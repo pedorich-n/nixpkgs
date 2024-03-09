@@ -29,7 +29,7 @@ buildPythonPackage rec {
   version = "2.6.3";
   pyproject = true;
 
-  disabled = pythonOlder "3.7";
+  disabled = pythonOlder "3.8";
 
   src = fetchFromGitHub {
     owner = "pydantic";
@@ -42,12 +42,12 @@ buildPythonPackage rec {
     libxcrypt
   ];
 
-  nativeBuildInputs = [
+  build-system = [
     hatch-fancy-pypi-readme
     hatchling
   ];
 
-  propagatedBuildInputs = [
+  dependencies = [
     annotated-types
     pydantic-core
     typing-extensions
