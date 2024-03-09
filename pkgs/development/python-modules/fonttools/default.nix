@@ -4,6 +4,7 @@
 , pythonOlder
 , isPyPy
 , fetchFromGitHub
+, setuptools
 , setuptools-scm
 , fs
 , lxml
@@ -14,6 +15,7 @@
 , lz4
 , scipy
 , munkres
+, pycairo
 , matplotlib
 , sympy
 , xattr
@@ -25,9 +27,9 @@
 buildPythonPackage rec {
   pname = "fonttools";
   version = "4.49.0";
-  format = "setuptools";
+  pyproject = true;
 
-  disabled = pythonOlder "3.7";
+  disabled = pythonOlder "3.8";
 
   src = fetchFromGitHub {
     owner  = pname;
@@ -36,16 +38,19 @@ buildPythonPackage rec {
     hash = "sha256-8xQVuAnIS/mwYKwI+ow0YArIP8wFTKWGLZ+NCgIFYok=";
   };
 
-  nativeBuildInputs = [ setuptools-scm ];
+  build-system = [
+    setuptools
+    setuptools-scm
+  ];
 
-  passthru.optional-dependencies = let
+  optional-dependencies = let
     extras = {
       ufo = [ fs ];
       lxml = [ lxml ];
       woff = [ (if isPyPy then brotlicffi else brotli) zopfli ];
       unicode = lib.optional (pythonOlder "3.11") unicodedata2;
       graphite = [ lz4 ];
-      interpolatable = [ (if isPyPy then munkres else scipy) ];
+      interpolatable = [ pycairo (if isPyPy then munkres else scipy) ];
       plot = [ matplotlib ];
       symfont = [ sympy ];
       type1 = lib.optional stdenv.isDarwin xattr;
@@ -66,7 +71,7 @@ buildPythonPackage rec {
     "pathops" # broken
   ] ++ [
     "repacker"
-  ]) passthru.optional-dependencies);
+  ]) optional-dependencies);
 
   pythonImportsCheck = [ "fontTools" ];
 
