@@ -1,4 +1,4 @@
-{ lib, stdenv, fetchFromGitHub, cmake, pkg-config, makeWrapper
+{ lib, stdenv, fetchFromGitHub, cmake, pkg-config, makeWrapper, runtimeShell
 , CoreFoundation, IOKit, libossp_uuid
 , nixosTests
 , bash, curl, jemalloc, json_c, libuv, zlib, libyaml, libelf, libbpf
@@ -17,6 +17,7 @@
 , withDebug ? false
 , withEbpf ? false
 , withNetworkViewer ? (!stdenv.isDarwin)
+, withNdsudo ? true
 }:
 
 stdenv.mkDerivation rec {
@@ -60,13 +61,13 @@ stdenv.mkDerivation rec {
     ++ lib.optionals withSsl [ openssl ];
 
   patches = [
-    # Allow ndsudo to use non-hardcoded `PATH`
-    # See https://github.com/netdata/netdata/pull/17377#issuecomment-2183017868
-    #     https://github.com/netdata/netdata/security/advisories/GHSA-pmhq-4cxq-wj93
-    ./ndsudo-fix-path.patch
     # Allow building without non-free v2 dashboard.
     ./dashboard-v2-removal.patch
-  ];
+  ]
+  # Allow ndsudo to use non-hardcoded `PATH`
+  # See https://github.com/netdata/netdata/pull/17377#issuecomment-2183017868
+  #     https://github.com/netdata/netdata/security/advisories/GHSA-pmhq-4cxq-wj93
+  ++ lib.optional withNdsudo  ./ndsudo-fix-path.patch;
 
   # Guard against unused buld-time development inputs in closure. Without
   # the ./skip-CONFIGURE_COMMAND.patch patch the closure retains inputs up
@@ -95,6 +96,23 @@ stdenv.mkDerivation rec {
        $out/libexec/netdata/plugins.d/debugfs.plugin.org
     mv $out/libexec/netdata/plugins.d/logs-management.plugin \
        $out/libexec/netdata/plugins.d/logs-management.plugin.org
+
+    ${lib.optionalString withNdsudo ''
+      mv $out/libexec/netdata/plugins.d/ndsudo \
+        $out/libexec/netdata/plugins.d/ndsudo.org
+
+      cat << 'EOF' > $out/libexec/netdata/plugins.d/ndsudo
+      #! ${runtimeShell}
+      ndsudo_path="/run/netdata/ndsudo/ndsudo"
+      if [[ -x "$ndsudo_path" ]]; then
+          "$ndsudo_path" "$@"
+      else
+          "${placeholder "out"}/libexec/netdata/plugins.d/ndsudo.org" "$@"
+      fi
+      EOF
+
+      chmod +x $out/libexec/netdata/plugins.d/ndsudo
+    ''}
     ${lib.optionalString withSystemdJournal ''
       mv $out/libexec/netdata/plugins.d/systemd-journal.plugin \
          $out/libexec/netdata/plugins.d/systemd-journal.plugin.org
@@ -193,7 +211,7 @@ stdenv.mkDerivation rec {
         license = lib.licenses.gpl3Only;
       };
     }).goModules;
-    inherit withIpmi withNetworkViewer;
+    inherit withIpmi withNetworkViewer withNdsudo;
     tests.netdata = nixosTests.netdata;
   };
 

@@ -23,6 +23,12 @@ let
     "${wrappedPlugins}/libexec/netdata/plugins.d"
   ] ++ cfg.extraPluginPaths;
 
+  extraNdsudoPathsEnv = pkgs.buildEnv {
+    name = "netdata-ndsudo-env";
+    paths = cfg.extraNdsudoPackages;
+    pathsToLink = [ "/bin" ];
+  };
+
   configDirectory = pkgs.runCommand "netdata-config-d" { } ''
     mkdir $out
     ${concatStringsSep "\n" (mapAttrsToList (path: file: ''
@@ -79,6 +85,24 @@ in {
           [
             pkgs.curl
             pkgs.which
+          ]
+        '';
+      };
+
+      extraNdsudoPackages = mkOption {
+        type = with types; listOf package;
+        default = [ ];
+        description = ''
+          Extra packages to add to `PATH` to make avaialable to `ndsudo`.
+
+          ::: {.warning}
+          `ndsudo` has SUID priveleges, be careful about packages you list here.
+          :::
+        '';
+        example = ''
+          [
+            pkgs.smartmontools
+            pkgs.nvme-cli
           ]
         '';
       };
@@ -274,7 +298,7 @@ in {
         config.environment.etc."netdata/netdata.conf".source
         config.environment.etc."netdata/conf.d".source
       ];
-      serviceConfig = {
+      serviceConfig = lib.mkMerge [ {
         ExecStart = "${cfg.package}/bin/netdata -P /run/netdata/netdata.pid -D -c /etc/netdata/netdata.conf";
         ExecReload = "${pkgs.util-linux}/bin/kill -s HUP -s USR1 -s USR2 $MAINPID";
         ExecStartPost = pkgs.writeShellScript "wait-for-netdata-up" ''
@@ -325,25 +349,38 @@ in {
         PrivateTmp = true;
         ProtectControlGroups = true;
         PrivateMounts = true;
-      } // (lib.optionalAttrs (cfg.claimTokenFile != null) {
+      }
+      (lib.optionalAttrs (cfg.claimTokenFile != null) {
         LoadCredential = [
           "netdata_claim_token:${cfg.claimTokenFile}"
         ];
 
-        ExecStartPre = pkgs.writeShellScript "netdata-claim" ''
-          set -euo pipefail
+        ExecStartPre = [
+          (pkgs.writeShellScript "netdata-claim" ''
+            set -euo pipefail
 
-          if [[ -f /var/lib/netdata/cloud.d/claimed_id ]]; then
-            # Already registered
-            exit
-          fi
+            if [[ -f /var/lib/netdata/cloud.d/claimed_id ]]; then
+              # Already registered
+              exit
+            fi
 
-          exec ${cfg.package}/bin/netdata-claim.sh \
-            -token="$(< "$CREDENTIALS_DIRECTORY/netdata_claim_token")" \
-            -url=https://app.netdata.cloud \
-            -daemon-not-running
-        '';
-      });
+            exec ${cfg.package}/bin/netdata-claim.sh \
+              -token="$(< "$CREDENTIALS_DIRECTORY/netdata_claim_token")" \
+              -url=https://app.netdata.cloud \
+              -daemon-not-running
+          '')
+        ];
+      })
+      (lib.mkIf (cfg.package.withNdsudo && cfg.extraNdsudoPackages != [ ]) {
+        ExecStartPre = [
+          (pkgs.writeShellScript "netdata-prestart" ''
+            ${lib.getExe' pkgs.coreutils "mkdir"} -p /run/netdata/ndsudo
+            ${lib.getExe' pkgs.coreutils "ln"} -s /run/wrappers/bin/ndsudo /run/netdata/ndsudo/ndsudo
+            ${lib.getExe' pkgs.coreutils "ln"} -s ${extraNdsudoPathsEnv}/bin /run/netdata/ndsudo/runtime-dependencies
+          '')
+        ];
+      })
+      ];
     };
 
     systemd.enableCgroupAccounting = true;
@@ -418,6 +455,14 @@ in {
         source = "${cfg.package}/libexec/netdata/plugins.d/network-viewer.plugin.org";
         capabilities = "cap_sys_admin,cap_dac_read_search,cap_sys_ptrace+ep";
         owner = cfg.user;
+        group = cfg.group;
+        permissions = "u+rx,g+x,o-rwx";
+      };
+    } // optionalAttrs (cfg.package.withNdsudo) {
+      "ndsudo" = {
+        source = "${cfg.package}/libexec/netdata/plugins.d/ndsudo.org";
+        setuid = true;
+        owner = "root";
         group = cfg.group;
         permissions = "u+rx,g+x,o-rwx";
       };
