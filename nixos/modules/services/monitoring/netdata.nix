@@ -58,6 +58,31 @@ in {
 
       package = mkPackageOption pkgs "netdata" { };
 
+      extraPackages = mkOption {
+        type = with types; listOf package;
+        default = with pkgs; [
+          curl
+          gawk
+          iproute2
+          which
+          procps
+          bash
+          iw # for charts.d
+          apcupsd # for charts.d
+          # TODO: firehol # for FireQoS -- this requires more NixOS module support.
+          util-linux # provides logger command; required for syslog health alarms
+        ];
+        description = ''
+          Extra packages to add to `PATH` to make available to Netdata in runtime
+        '';
+        example = ''
+          [
+            pkgs.curl
+            pkgs.which
+          ]
+        '';
+      };
+
       user = mkOption {
         type = types.str;
         default = "netdata";
@@ -83,13 +108,14 @@ in {
       };
 
       python = {
-        enable = mkOption {
-          type = types.bool;
+        enable = mkEnableOption "python-based plugins" // {
           default = true;
-          description = ''
-            Whether to enable python-based plugins
-          '';
         };
+
+        package = mkPackageOption pkgs "python3" {
+          example = "pkgs.python312";
+        };
+
         recommendedPythonPackages = mkOption {
           type = types.bool;
           default = false;
@@ -98,6 +124,7 @@ in {
             by installing extra Python packages.
           '';
         };
+
         extraPackages = mkOption {
           type = types.functionTo (types.listOf types.package);
           default = ps: [];
@@ -231,20 +258,8 @@ in {
       # No wrapper means no "useful" netdata.
       requires = [ "suid-sgid-wrappers.service" ];
       wantedBy = [ "multi-user.target" ];
-      path = (with pkgs; [
-          curl
-          gawk
-          iproute2
-          which
-          procps
-          bash
-          nvme-cli # for go.d
-          iw # for charts.d
-          apcupsd # for charts.d
-          # TODO: firehol # for FireQoS -- this requires more NixOS module support.
-          util-linux # provides logger command; required for syslog health alarms
-      ])
-        ++ lib.optional cfg.python.enable (pkgs.python3.withPackages cfg.python.extraPackages)
+      path = cfg.extraPackages
+        ++ lib.optional cfg.python.enable (cfg.python.package.withPackages cfg.python.extraPackages)
         ++ lib.optional config.virtualisation.libvirtd.enable config.virtualisation.libvirtd.package
         ++ lib.optional config.virtualisation.docker.enable config.virtualisation.docker.package
         ++ lib.optionals config.virtualisation.podman.enable [ pkgs.jq config.virtualisation.podman.package ]
