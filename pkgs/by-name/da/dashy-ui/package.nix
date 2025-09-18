@@ -11,7 +11,7 @@
   nixosTests,
   nodejs_20,
   nodejs-slim_20,
-  yq-go,
+  formats,
   settings ? { },
 }:
 stdenv.mkDerivation (finalAttrs: {
@@ -40,7 +40,7 @@ stdenv.mkDerivation (finalAttrs: {
   # Config validation needs to happen after yarnConfigHook, since it's what sets the yarn offline cache
   preBuild = lib.optional (settings != { }) ''
     echo "Writing settings override..."
-    yq --output-format yml '${builtins.toFile "conf.json" ''${builtins.toJSON settings}''}' > user-data/conf.yml
+    cp "${(formats.yaml {}).generate "dashy-conf.yaml" settings}" "user-data/conf.yml"
     yarn validate-config --offline
   '';
   installPhase = ''
@@ -65,8 +65,6 @@ stdenv.mkDerivation (finalAttrs: {
     })
     yarnBuildHook
     nodejs_20
-    # For yaml parsing
-    yq-go
   ];
   doDist = false;
   meta = {
